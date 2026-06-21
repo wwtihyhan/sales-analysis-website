@@ -557,78 +557,80 @@ class AISalesAnalyzer:
         else:
             valid_dates = df[date_col].dropna()
             if len(valid_dates) > 0:
-                min_date = valid_dates.min()  # 最早日期
-                max_date = valid_dates.max()  # 最晚日期
-                # 如果数据跨度超过30天，取最近30天
-                if (max_date - min_date).days > 30:
-                    min_date = max_date - timedelta(days=30)
+                max_date = valid_dates.max()  # 最晚日期（基准日）
+                # 近30天：从基准日往前推30天（不包含第30天当天）
+                # 例如 06-18 为基准，则取 (05-19, 06-18]
+                min_date = max_date - timedelta(days=30)
                 stats["time_range"] = {
-                    "start": min_date.strftime("%Y-%m-%d"),
+                    "start": (min_date + timedelta(days=1)).strftime("%Y-%m-%d"),
                     "end": max_date.strftime("%Y-%m-%d"),
                 }
-                recent_df = df[(df[date_col] >= min_date) & (df[date_col] <= max_date)].copy()
-                logger.info(f"日期筛选: {stats['time_range']['start']} ~ {stats['time_range']['end']} | 筛选后 {len(recent_df)}/{len(df)} 条")
+                recent_df = df[(df[date_col] > min_date) & (df[date_col] <= max_date)].copy()
+                logger.info(
+                    f"日期筛选: {stats['time_range']['start']} ~ {stats['time_range']['end']} "
+                    f"| 筛选后 {len(recent_df)}/{len(df)} 条"
+                )
             else:
                 recent_df = df.copy()
                 stats["time_range"] = {"start": "未知", "end": "未知"}
 
         # 确保数值列是数字类型
-        for num_col in ["业绩金额", "利润金额", "金重", "银重"]:
+        for num_col in ["业绩金额", "利润金额", "销售金额", "金重", "银重"]:
             if num_col in recent_df.columns:
                 recent_df[num_col] = pd.to_numeric(recent_df[num_col], errors="coerce")
 
+        # ========== 有效业绩列 ==========
+        # 部分记录(如赠品、玉器)的业绩金额=0但销售金额>0
+        # 参考报告对这类记录使用「销售金额」作为有效业绩
+        def _effective_revenue(row):
+            yj = row.get("业绩金额", 0) or 0
+            xs = row.get("销售金额", 0) or 0
+            return yj if yj > 0 else max(xs, 0)
+
+        recent_df["eff_rev"] = recent_df.apply(_effective_revenue, axis=1)
+
         # ========== 维度1：基础KPI ==========
-        revenue_series = recent_df["业绩金额"].dropna() if "业绩金额" in recent_df.columns else pd.Series([])
+        eff_rev_series = recent_df["eff_rev"]
         profit_series = recent_df["利润金额"].dropna() if "利润金额" in recent_df.columns else pd.Series([])
 
-        # 营业总额 = 全部正向业绩金额合计（所有类型，只要业绩>0都算营业额）
-        if len(revenue_series) > 0:
-            positive_revenue = revenue_series[revenue_series > 0]
-            stats["total_revenue"] = round(float(positive_revenue.sum()), 2) if len(positive_revenue) > 0 else 0
-            stats["sales_count"] = int(len(positive_revenue))
-            stats["sales_revenue"] = stats["total_revenue"]
-        else:
-            stats["total_revenue"] = 0
-            stats["sales_count"] = 0
-            stats["sales_revenue"] = 0
+        # 营业总额 = 有效业绩 > 0 的合计（含所有类型的正向记录）
+        pos_eff = eff_rev_series[eff_rev_series > 0]
+        stats["total_revenue"] = round(float(pos_eff.sum()), 2) if len(pos_eff) > 0 else 0
+        stats["sales_count"] = int(len(pos_eff))
+        stats["sales_revenue"] = stats["total_revenue"]
 
-        # 总利润 = 仅「销售」类型的利润合计（排除回收/退换/赠品等）
-        if len(profit_series) > 0 and "销售类型" in recent_df.columns:
-            sales_only_profit = recent_df[recent_df["销售类型"] == "销售"]["利润金额"]
-            sales_only_profit = pd.to_numeric(sales_only_profit, errors="coerce").dropna()
-            stats["total_profit"] = round(float(sales_only_profit.sum()), 2) if len(sales_only_profit) > 0 else 0
-            logger.info(f"利润计算: 仅取「销售」类型 | {len(sales_only_profit)}条 | 合计=¥{stats['total_profit']:,}")
-        elif len(profit_series) > 0:
-            stats["total_profit"] = round(float(profit_series.sum()), 2)
-        else:
-            stats["total_profit"] = 0
+        # 总利润 = 全部记录的利润金额合计（含退换亏损、赠品成本等，与参考报告一致）
+        stats["total_profit"] = round(float(profit_series.sum()), 2) if len(profit_series) > 0 else 0
 
-        logger.info(f"基础KPI | 营业总额: ¥{stats['total_revenue']:,} | 总利润: ¥{stats['total_profit']:,} | 笔数: {stats['sales_count']}")
+        logger.info(
+            f"基础KPI | 营业总额: ¥{stats['total_revenue']:,} | "
+            f"总利润: ¥{stats['total_profit']:,} | 笔数: {stats['sales_count']}"
+        )
 
         # ========== 维度2：价格区间业绩排名 ==========
         stats["range_stats"] = []
         stats["range_details"] = {}
 
-        if "业绩金额" in recent_df.columns:
-            sales_only = recent_df[recent_df["业绩金额"] > 0].copy()
+        if "eff_rev" in recent_df.columns:
+            sales_only = recent_df[recent_df["eff_rev"] > 0].copy()
             for range_def in self.PRICE_RANGES:
-                mask = (sales_only["业绩金额"] > range_def["min"]) & (sales_only["业绩金额"] <= range_def["max"])
+                mask = (sales_only["eff_rev"] > range_def["min"]) & (sales_only["eff_rev"] <= range_def["max"])
                 range_df = sales_only[mask]
                 count = len(range_df)
-                total = round(float(range_df["业绩金额"].sum()), 2) if count > 0 else 0
+                total = round(float(range_df["eff_rev"].sum()), 2) if count > 0 else 0
                 avg = round(total / count, 2) if count > 0 else 0
 
                 # 收集交易明细（最多20条）
                 transactions = []
                 for _, row in range_df.head(20).iterrows():
                     tx_date = row.get(date_col, "")
-                    if hasattr(tx_date, 'strftime'):
+                    if hasattr(tx_date, "strftime"):
                         tx_date = tx_date.strftime("%Y-%m-%d %H:%M")
                     transactions.append({
                         "date": str(tx_date),
                         "name": str(row.get("商品名称", ""))[:30],
                         "cat": str(row.get("小类", ""))[:20],
-                        "amount": round(float(row.get("业绩金额", 0)), 2),
+                        "amount": round(float(row.get("eff_rev", 0)), 2),
                     })
 
                 stats["range_stats"].append({
@@ -650,9 +652,11 @@ class AISalesAnalyzer:
 
         # ========== 维度3：品类业绩对比 ==========
         stats["cat_stats"] = []
-        if "小类" in recent_df.columns and "业绩金额" in recent_df.columns:
-            cat_grouped = recent_df.groupby("小类")["业绩金额"].agg(['count', 'sum']).reset_index()
+        if "小类" in recent_df.columns and "eff_rev" in recent_df.columns:
+            cat_grouped = recent_df.groupby("小类")["eff_rev"].agg(["count", "sum"]).reset_index()
             cat_grouped.columns = ["name", "count", "total"]
+            # 只保留有效业绩>0的品类
+            cat_grouped = cat_grouped[cat_grouped["total"] > 0]
             cat_grouped["total"] = cat_grouped["total"].apply(lambda x: round(abs(float(x)), 2))
             cat_grouped = cat_grouped.sort_values("total", ascending=False)
             for _, row in cat_grouped.iterrows():
@@ -665,9 +669,10 @@ class AISalesAnalyzer:
 
         # ========== 维度4：热销商品 TOP8 ==========
         stats["prod_stats"] = []
-        if "商品名称" in recent_df.columns and "业绩金额" in recent_df.columns:
-            prod_grouped = recent_df.groupby("商品名称")["业绩金额"].agg(['count', 'sum']).reset_index()
+        if "商品名称" in recent_df.columns and "eff_rev" in recent_df.columns:
+            prod_grouped = recent_df.groupby("商品名称")["eff_rev"].agg(["count", "sum"]).reset_index()
             prod_grouped.columns = ["name", "count", "total"]
+            prod_grouped = prod_grouped[prod_grouped["total"] > 0]
             prod_grouped["total"] = prod_grouped["total"].apply(lambda x: round(abs(float(x)), 2))
             prod_grouped = prod_grouped.sort_values("total", ascending=False).head(8)
             for _, row in prod_grouped.iterrows():
