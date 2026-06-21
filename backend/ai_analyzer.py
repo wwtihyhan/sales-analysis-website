@@ -581,21 +581,29 @@ class AISalesAnalyzer:
         revenue_series = recent_df["业绩金额"].dropna() if "业绩金额" in recent_df.columns else pd.Series([])
         profit_series = recent_df["利润金额"].dropna() if "利润金额" in recent_df.columns else pd.Series([])
 
-        # 营业总额 = 正向业绩金额合计（不含回收/退货等负值）
+        # 营业总额 = 全部正向业绩金额合计（所有类型，只要业绩>0都算营业额）
         if len(revenue_series) > 0:
             positive_revenue = revenue_series[revenue_series > 0]
             stats["total_revenue"] = round(float(positive_revenue.sum()), 2) if len(positive_revenue) > 0 else 0
             stats["sales_count"] = int(len(positive_revenue))
-            stats["sales_revenue"] = stats["total_revenue"]  # 与营业额一致
+            stats["sales_revenue"] = stats["total_revenue"]
         else:
             stats["total_revenue"] = 0
             stats["sales_count"] = 0
             stats["sales_revenue"] = 0
 
-        # 利润 = 全部利润金额合计（含正负）
-        stats["total_profit"] = round(float(profit_series.sum()), 2) if len(profit_series) > 0 else 0
+        # 总利润 = 仅「销售」类型的利润合计（排除回收/退换/赠品等）
+        if len(profit_series) > 0 and "销售类型" in recent_df.columns:
+            sales_only_profit = recent_df[recent_df["销售类型"] == "销售"]["利润金额"]
+            sales_only_profit = pd.to_numeric(sales_only_profit, errors="coerce").dropna()
+            stats["total_profit"] = round(float(sales_only_profit.sum()), 2) if len(sales_only_profit) > 0 else 0
+            logger.info(f"利润计算: 仅取「销售」类型 | {len(sales_only_profit)}条 | 合计=¥{stats['total_profit']:,}")
+        elif len(profit_series) > 0:
+            stats["total_profit"] = round(float(profit_series.sum()), 2)
+        else:
+            stats["total_profit"] = 0
 
-        logger.info(f"基础KPI | 营业总额: ¥{stats['total_revenue']:,} | 利润: ¥{stats['total_profit']:,} | 笔数: {stats['sales_count']}")
+        logger.info(f"基础KPI | 营业总额: ¥{stats['total_revenue']:,} | 总利润: ¥{stats['total_profit']:,} | 笔数: {stats['sales_count']}")
 
         # ========== 维度2：价格区间业绩排名 ==========
         stats["range_stats"] = []
