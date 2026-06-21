@@ -741,14 +741,79 @@ class AISalesAnalyzer:
         silver_value_total = 0
         silver_count = 0
 
+        def _get_metal_weight(row, metal_type):
+            """
+            获取回收记录的金属克重。
+            兼容POS系统数据特点：银料重量可能写在「金重」或「件重」列（而非「银重」列）。
+
+            Args:
+                row: DataFrame 行
+                metal_type: "gold" 或 "silver"
+
+            Returns:
+                克重（绝对值）
+            """
+            if metal_type == "gold":
+                # 黄金：优先取「金重」，fallback 到「件重」
+                w = abs(float(row.get("金重", 0) or 0))
+                if w == 0:
+                    w = abs(float(row.get("件重", 0) or 0))
+                return w
+            else:
+                # 白银：优先取「银重」，为0时 fallback 到「金重」「件重」（POS常见写法）
+                w = abs(float(row.get("银重", 0) or 0))
+                if w == 0:
+                    w = abs(float(row.get("金重", 0) or 0))
+                if w == 0:
+                    w = abs(float(row.get("件重", 0) or 0))
+                return w
+
+        def _guess_metal_type(row):
+            """
+            智能判断金属类型（当商品名称为空或无明确关键词时）。
+            通过重量列数据特征推断：如果「银重」>0 则为银，否则看「金重」。
+            同时参考商品名称关键词。
+            """
+            name = str(row.get("商品名称", ""))
+            # 关键词匹配（优先）
+            gold_keywords = ['金', 'AU', 'au', '素圈', '黄金', '足金', 'K金', 'k金']
+            silver_keywords = ['银', 'AG', 'ag', '足银', 'S925', 's925', '纯银', '白银', '旧银', '银饰']
+
+            has_gold_kw = any(kw in name for kw in gold_keywords)
+            has_silver_kw = any(kw in name for kw in silver_keywords)
+
+            if has_gold_kw and not has_silver_kw:
+                return "gold"
+            if has_silver_kw and not has_gold_kw:
+                return "silver"
+
+            # 名称无法判断 → 用重量列数据推断
+            silver_w = float(row.get("银重", 0) or 0)
+            gold_w = float(row.get("金重", 0) or 0)
+
+            if silver_w != 0 and gold_w == 0:
+                return "silver"
+            if gold_w != 0 and silver_w == 0:
+                # 有金重无银重：需要进一步区分
+                # 如果金重值较小(<100g)且业绩金额也较小(可能是银料按金价列写的)
+                paid = abs(float(row.get("业绩金额", 0) or 0))
+                if paid > 0 and gold_w > 0:
+                    unit_price = paid / gold_w
+                    # 黄金价通常 >400元/g，银价通常 <30元/g
+                    if unit_price < 50:
+                        return "silver"
+                return "gold"
+
+            # 默认按黄金处理（回收中黄金更常见）
+            return "gold"
+
         for idx, row in recycle_df.iterrows():
             name = str(row.get("商品名称", ""))
-            # 判断金属类型
-            is_gold = any(kw in name for kw in ['金', 'AU', 'au', '素圈'])
+            # 智能判断金属类型
+            metal_type = _guess_metal_type(row)
+            weight = _get_metal_weight(row, metal_type)
 
-            if is_gold:
-                weight = abs(float(row.get("金重", 0) or 0))
-                metal_type = "gold"
+            if metal_type == "gold":
                 price = self.gold_price
                 gold_count += 1
                 gold_g_total += weight
@@ -757,8 +822,6 @@ class AISalesAnalyzer:
                 value = weight * price
                 gold_value_total += value
             else:
-                weight = abs(float(row.get("银重", 0) or 0))
-                metal_type = "silver"
                 price = self.silver_price
                 silver_count += 1
                 silver_g_total += weight
