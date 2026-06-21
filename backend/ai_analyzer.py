@@ -648,6 +648,13 @@ class AISalesAnalyzer:
             # 按总金额降序排列
             stats["range_stats"].sort(key=lambda x: x["total"], reverse=True)
 
+            # 计算占比（基于全部正向业绩）
+            total_count = sum(r["count"] for r in stats["range_stats"])
+            total_rev = sum(r["total"] for r in stats["range_stats"])
+            for r in stats["range_stats"]:
+                r["count_pct"] = round(r["count"] / total_count * 100, 1) if total_count > 0 else 0
+                r["revenue_pct"] = round(r["total"] / total_rev * 100, 1) if total_rev > 0 else 0
+
         logger.info(f"价格区间 | {len(stats['range_stats'])} 个区间有数据")
 
         # ========== 维度3：品类业绩对比 ==========

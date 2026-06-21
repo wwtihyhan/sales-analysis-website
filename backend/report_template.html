@@ -94,7 +94,7 @@
   <div class="full-card">
     <div class="table-wrap">
     <table>
-      <thead><tr><th>排名</th><th>价格区间</th><th>销量</th><th>业绩总额</th><th>均价</th></tr></thead>
+      <thead><tr><th>排名</th><th>价格区间</th><th>销量</th><th>销量占比</th><th>业绩总额</th><th>业绩占比</th><th>均价</th></tr></thead>
       <tbody id="range-tbody"></tbody>
     </table>
     </div>
@@ -131,6 +131,11 @@
     </div>
   </div>
 
+  <div class="section-title">💡 核心业务洞察</div>
+  <div class="full-card" id="insight-card">
+    <div id="insight-body"></div>
+  </div>
+
   <div class="section-title">♻️ 旧料回收明细 & 盈亏分析</div>
   <div class="full-card">
     <div class="profit-grid" id="recycle-kpi"></div>
@@ -157,8 +162,10 @@ document.getElementById('kpi-sales').textContent = '¥' + DATA.sales_revenue.toL
 var rangeHtml = '';
 DATA.range_stats.forEach(function(item, i){
   var medal = i===0?'🥇':i===1?'🥈':i===2?'🥉':(i+1);
-  rangeHtml += '<tr class="clickable" onclick="toggleDrill('+i+')"><td><span class="medal">'+medal+'</span></td><td><strong>'+item.range+'</strong></td><td>'+item.count+'笔</td><td class="num">¥'+item.total.toLocaleString()+'</td><td class="num">¥'+item.avg.toLocaleString()+'</td></tr>';
-  rangeHtml += '<tr id="drill-'+i+'" class="drill-row" style="display:none;"><td colspan="5"><div class="drill-inner"><div class="drill-header"><span class="drill-label">📋 '+item.range+' 区间交易明细</span><span class="drill-value">¥'+DATA.range_details[item.range].total_amount.toLocaleString()+'</span><span class="drill-count">共 '+DATA.range_details[item.range].count+' 笔</span></div><table class="drill-table"><thead><tr><th>#</th><th>日期</th><th>商品名称</th><th>品类</th><th>金额(¥)</th></tr></thead><tbody>';
+  var cpBar = '<div style="background:#e8f5e9;border-radius:3px;width:60px;height:6px;overflow:hidden;"><div style="background:#27ae60;height:100%;border-radius:3px;width:'+item.count_pct+'%"></div></div>';
+  var rpBar = '<div style="background:#fce4ec;border-radius:3px;width:60px;height:6px;overflow:hidden;"><div style="background:#e74c3c;height:100%;border-radius:3px;width:'+Math.min(item.revenue_pct,100)+'%"></div></div>';
+  rangeHtml += '<tr class="clickable" onclick="toggleDrill('+i+')"><td><span class="medal">'+medal+'</span></td><td><strong>'+item.range+'</strong></td><td>'+item.count+'笔</td><td><div style="display:flex;align-items:center;gap:4px;"><span style="font-size:12px;color:#27ae60;font-weight:600;">'+item.count_pct+'%</span>'+cpBar+'</div></td><td class="num">¥'+item.total.toLocaleString()+'</td><td><div style="display:flex;align-items:center;gap:4px;"><span style="font-size:12px;color:#e74c3c;font-weight:600;">'+item.revenue_pct+'%</span>'+rpBar+'</div></td><td class="num">¥'+item.avg.toLocaleString()+'</td></tr>';
+  rangeHtml += '<tr id="drill-'+i+'" class="drill-row" style="display:none;"><td colspan="7"><div class="drill-inner"><div class="drill-header"><span class="drill-label">📋 '+item.range+' 区间交易明细</span><span class="drill-value">¥'+DATA.range_details[item.range].total_amount.toLocaleString()+'</span><span class="drill-count">共 '+DATA.range_details[item.range].count+' 笔</span></div><table class="drill-table"><thead><tr><th>#</th><th>日期</th><th>商品名称</th><th>品类</th><th>金额(¥)</th></tr></thead><tbody>';
   DATA.range_details[item.range].transactions.forEach(function(tx, j){
     rangeHtml += '<tr><td>'+(j+1)+'</td><td>'+tx.date+'</td><td>'+tx.name+'</td><td><span class="cat-tag">'+(tx.cat||'')+'</span></td><td class="num">¥'+tx.amount.toLocaleString()+'</td></tr>';
   });
@@ -203,6 +210,22 @@ DATA.recycle_items.forEach(function(item, i){
   recHtml += '<tr id="rec-drill-'+i+'" class="drill-row" style="display:none;"><td colspan="8"><div class="drill-inner" style="padding:10px 14px;"><div style="display:flex;gap:15px;flex-wrap:wrap;"><div style="background:#fffdf5;border-radius:6px;padding:8px 12px;"><span style="font-size:11px;color:#b8860b;">回收克价</span><div style="font-size:15px;font-weight:700;color:#b8860b;">¥'+(item.paid/item.weight).toFixed(0)+'/g</div></div><div style="background:#f0fff0;border-radius:6px;padding:8px 12px;"><span style="font-size:11px;color:#27ae60;">'+priceLabel+'¥'+item.price+'/g · 当前市值</span><div style="font-size:15px;font-weight:700;color:#27ae60;">¥'+item.value.toLocaleString()+'</div></div><div style="background:#f8f9fa;border-radius:6px;padding:8px 12px;"><span style="font-size:11px;color:#636e72;">重量差价</span><div style="font-size:15px;font-weight:700;color:#636e72;">¥'+(item.price - item.paid/item.weight).toFixed(1)+'/g</div></div></div></div></td></tr>';
 });
 document.getElementById('recycle-tbody').innerHTML = recHtml;
+
+// 核心洞察
+if(DATA.insights && DATA.insights.length > 0){
+  var ih = '';
+  var iconMap = ['🔥','📈','💰','🎯','⚡','🏷️','♻️','💡','📊','✨'];
+  DATA.insights.forEach(function(ins, idx){
+    var icon = iconMap[idx % iconMap.length];
+    ih += '<div style="display:flex;gap:10px;padding:10px 0;border-bottom:1px solid #f5f5f5;">';
+    ih += '<span style="font-size:18px;flex-shrink:0;margin-top:2px;">'+icon+'</span>';
+    ih += '<div style="font-size:13.5px;line-height:1.65;color:#2d3436;">'+ins+'</div>';
+    ih += '</div>';
+  });
+  document.getElementById('insight-body').innerHTML = ih;
+} else {
+  document.getElementById('insight-body').innerHTML = '<div style="color:#b2bec3;text-align:center;padding:20px;font-size:13px;">暂无洞察数据</div>';
+}
 
 // 图表
 new Chart(document.getElementById('chartCat'), {
