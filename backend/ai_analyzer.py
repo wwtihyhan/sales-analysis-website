@@ -56,6 +56,17 @@ class AISalesAnalyzer:
         {"label": "5000元以上", "min": 5000, "max": float("inf")},
     ]
 
+    # 列名别名映射（支持不同来源的Excel格式）
+    COLUMN_ALIASES = {
+        "业绩金额": ["总金额", "金额", "销售金额", "实收金额", "应收金额", "业绩"],
+        "利润金额": ["利润", "毛利", "毛利润", "纯利", "净利润"],
+        "商品名称": ["商品名", "品名", "商品", "货品名称", "商品条码", "条码", "货号"],
+        "小类": ["类别", "分类", "品类", "子类", "子类别", "小类别"],
+        "金重": ["金重(g)", "黄金重量", "黄金克重", "金料重量", "Au重量"],
+        "银重": ["银重(g)", "白银重量", "白银克重", "银料重量", "Ag重量"],
+        "销售类型": ["类型", "交易类型", "业务类型", "操作类型", "单据类型"],
+    }
+
     def __init__(
         self,
         api_key: str,
@@ -104,18 +115,26 @@ class AISalesAnalyzer:
         prompt = self._build_analysis_prompt(df, data_text)
         logger.info(f"Prompt 构建完成 | 长度: {len(prompt)} 字符")
 
-        # Step 4: 调用 AI 分析
-        analysis_result = self._call_ai_api(prompt)
+        # Step 4: 调用 AI 分析（获取业务洞察）
+        ai_result = self._call_ai_api(prompt)
 
-        # Step 5: 补充基础统计（作为备用/校验）
-        basic_stats = self._calculate_basic_stats(df)
-        analysis_result.update(basic_stats)
+        # Step 5: 用 Pandas 计算完整的结构化数据（核心数据源）
+        pandas_stats = self._calculate_full_stats(df)
+        analysis_result = pandas_stats
 
-        # Step 6: 生成 HTML 报告
+        # Step 6: 合并AI洞察（如果AI返回了有效数据）
+        if ai_result and ai_result.get("insights"):
+            analysis_result["insights"] = ai_result["insights"]
+        # 如果Pandas计算的某些字段为空但AI有数据，用AI补充
+        for key in ["range_stats", "cat_stats", "prod_stats", "recycle_items"]:
+            if not analysis_result.get(key) and ai_result.get(key):
+                analysis_result[key] = ai_result[key]
+
+        # Step 7: 生成 HTML 报告
         report_html = self._generate_report(analysis_result)
         analysis_result["report_html"] = report_html
 
-        # Step 7: 记录文件信息
+        # Step 8: 记录文件信息
         analysis_result["file_name"] = file_path.split("/")[-1]
         analysis_result["id"] = str(uuid.uuid4())
         analysis_result["created_at"] = datetime.now().isoformat()
@@ -123,6 +142,37 @@ class AISalesAnalyzer:
         logger.info(f"分析完成 | ID: {analysis_result['id']}")
 
         return analysis_result
+
+    def _normalize_columns(self, df: pd.DataFrame) -> pd.DataFrame:
+        """
+        标准化列名：将各种别名统一为标准列名
+
+        Args:
+            df: 原始DataFrame
+
+        Returns:
+            列名标准化后的DataFrame
+        """
+        col_mapping = {}
+        for std_name, aliases in self.COLUMN_ALIASES.items():
+            # 如果标准列名已存在，跳过
+            if std_name in df.columns:
+                continue
+            # 查找别名
+            for alias in aliases:
+                for col in df.columns:
+                    if col.strip() == alias or col.strip().lower() == alias.lower():
+                        col_mapping[col] = std_name
+                        logger.info(f"  列名映射: '{col}' → '{std_name}'")
+                        break
+                if std_name in [col_mapping.get(c) for c in df.columns]:
+                    break
+
+        if col_mapping:
+            df = df.rename(columns=col_mapping)
+            logger.info(f"已映射 {len(col_mapping)} 个列名: {col_mapping}")
+
+        return df
 
     def _read_excel(self, file_path: str) -> pd.DataFrame:
         """
@@ -147,6 +197,10 @@ class AISalesAnalyzer:
 
             # 清理列名（去除空格）
             df.columns = [str(col).strip() for col in df.columns]
+
+            # 标准化列名映射
+            df = self._normalize_columns(df)
+            logger.info(f"标准化后列名: {list(df.columns)}")
 
             # 标准化日期列
             date_cols = ["销售时间", "日期", "time", "date", "Date"]
@@ -467,21 +521,27 @@ class AISalesAnalyzer:
 
         return result
 
-    def _calculate_basic_stats(self, df: pd.DataFrame) -> Dict[str, Any]:
+    def _calculate_full_stats(self, df: pd.DataFrame) -> Dict[str, Any]:
         """
-        使用 Pandas 计算基础统计数据（作为AI分析的补充/校验）
+        使用 Pandas 计算完整的数据统计（核心数据源）
+
+        计算报告模板所需的所有字段，确保数据准确完整
 
         Args:
             df: DataFrame
 
         Returns:
-            基础统计字典
+            完整的统计字典
         """
-        stats = {}
+        stats = {
+            "generate_time": datetime.now().strftime("%Y-%m-%d %H:%M"),
+            "gold_price": self.gold_price,
+            "silver_price": self.silver_price,
+        }
 
-        # 日期范围
+        # ========== 日期处理 ==========
         date_col = None
-        for candidate in ["销售时间", "日期"]:
+        for candidate in ["销售时间", "日期", "time", "date"]:
             if candidate in df.columns:
                 try:
                     df[candidate] = pd.to_datetime(df[candidate], errors="coerce")
@@ -490,44 +550,280 @@ class AISalesAnalyzer:
                 except Exception:
                     continue
 
-        if date_col:
+        if not date_col:
+            logger.warning("未找到日期列，使用全部数据")
+            recent_df = df.copy()
+            stats["time_range"] = {"start": "未知", "end": "未知"}
+        else:
             valid_dates = df[date_col].dropna()
             if len(valid_dates) > 0:
-                max_date = valid_dates.max()
-                min_date = max_date - timedelta(days=30)
+                min_date = valid_dates.min()  # 最早日期
+                max_date = valid_dates.max()  # 最晚日期
+                # 如果数据跨度超过30天，取最近30天
+                if (max_date - min_date).days > 30:
+                    min_date = max_date - timedelta(days=30)
                 stats["time_range"] = {
                     "start": min_date.strftime("%Y-%m-%d"),
                     "end": max_date.strftime("%Y-%m-%d"),
                 }
+                recent_df = df[(df[date_col] >= min_date) & (df[date_col] <= max_date)].copy()
+                logger.info(f"日期筛选: {stats['time_range']['start']} ~ {stats['time_range']['end']} | 筛选后 {len(recent_df)}/{len(df)} 条")
+            else:
+                recent_df = df.copy()
+                stats["time_range"] = {"start": "未知", "end": "未知"}
 
-                # 筛选最近30天的销售数据
-                recent_df = df[(df[date_col] >= min_date) & (df[date_col] <= max_date)]
+        # 确保数值列是数字类型
+        for num_col in ["业绩金额", "利润金额", "金重", "银重"]:
+            if num_col in recent_df.columns:
+                recent_df[num_col] = pd.to_numeric(recent_df[num_col], errors="coerce")
 
-                # 计算营业额和利润
-                if "业绩金额" in recent_df.columns:
-                    revenue = (
-                        pd.to_numeric(recent_df["业绩金额"], errors="coerce")
-                        .dropna()
-                        .sum()
-                    )
-                    stats["total_revenue"] = round(float(revenue), 2)
+        # ========== 维度1：基础KPI ==========
+        revenue_series = recent_df["业绩金额"].dropna() if "业绩金额" in recent_df.columns else pd.Series([])
+        profit_series = recent_df["利润金额"].dropna() if "利润金额" in recent_df.columns else pd.Series([])
 
-                if "利润金额" in recent_df.columns:
-                    profit = (
-                        pd.to_numeric(recent_df["利润金额"], errors="coerce")
-                        .dropna()
-                        .sum()
-                    )
-                    stats["total_profit"] = round(float(profit), 2)
+        stats["total_revenue"] = round(float(abs(revenue_series).sum()), 2) if len(revenue_series) > 0 else 0
+        stats["total_profit"] = round(float(profit_series.sum()), 2) if len(profit_series) > 0 else 0
 
-                # 销售笔数
-                if "业绩金额" in recent_df.columns:
-                    sales_count = (
-                        pd.to_numeric(recent_df["业绩金额"], errors="coerce") > 0
-                    ).sum()
-                    stats["sales_count"] = int(sales_count)
+        # 销售笔数（业绩金额>0的记录）
+        if len(revenue_series) > 0:
+            stats["sales_count"] = int((revenue_series > 0).sum())
+            # 正向销售额（不含退货/回收等负值记录）
+            positive_revenue = revenue_series[revenue_series > 0]
+            stats["sales_revenue"] = round(float(positive_revenue.sum()), 2) if len(positive_revenue) > 0 else 0
+        else:
+            stats["sales_count"] = 0
+            stats["sales_revenue"] = 0
+
+        logger.info(f"基础KPI | 营业额: ¥{stats['total_revenue']:,} | 利润: ¥{stats['total_profit']:,} | 笔数: {stats['sales_count']}")
+
+        # ========== 维度2：价格区间业绩排名 ==========
+        stats["range_stats"] = []
+        stats["range_details"] = {}
+
+        if "业绩金额" in recent_df.columns:
+            sales_only = recent_df[recent_df["业绩金额"] > 0].copy()
+            for range_def in self.PRICE_RANGES:
+                mask = (sales_only["业绩金额"] > range_def["min"]) & (sales_only["业绩金额"] <= range_def["max"])
+                range_df = sales_only[mask]
+                count = len(range_df)
+                total = round(float(range_df["业绩金额"].sum()), 2) if count > 0 else 0
+                avg = round(total / count, 2) if count > 0 else 0
+
+                # 收集交易明细（最多20条）
+                transactions = []
+                for _, row in range_df.head(20).iterrows():
+                    tx_date = row.get(date_col, "")
+                    if hasattr(tx_date, 'strftime'):
+                        tx_date = tx_date.strftime("%Y-%m-%d %H:%M")
+                    transactions.append({
+                        "date": str(tx_date),
+                        "name": str(row.get("商品名称", ""))[:30],
+                        "cat": str(row.get("小类", ""))[:20],
+                        "amount": round(float(row.get("业绩金额", 0)), 2),
+                    })
+
+                stats["range_stats"].append({
+                    "range": range_def["label"],
+                    "count": count,
+                    "total": total,
+                    "avg": avg,
+                })
+                stats["range_details"][range_def["label"]] = {
+                    "total_amount": total,
+                    "count": count,
+                    "transactions": transactions,
+                }
+
+            # 按总金额降序排列
+            stats["range_stats"].sort(key=lambda x: x["total"], reverse=True)
+
+        logger.info(f"价格区间 | {len(stats['range_stats'])} 个区间有数据")
+
+        # ========== 维度3：品类业绩对比 ==========
+        stats["cat_stats"] = []
+        if "小类" in recent_df.columns and "业绩金额" in recent_df.columns:
+            cat_grouped = recent_df.groupby("小类")["业绩金额"].agg(['count', 'sum']).reset_index()
+            cat_grouped.columns = ["name", "count", "total"]
+            cat_grouped["total"] = cat_grouped["total"].apply(lambda x: round(abs(float(x)), 2))
+            cat_grouped = cat_grouped.sort_values("total", ascending=False)
+            for _, row in cat_grouped.iterrows():
+                stats["cat_stats"].append({
+                    "name": str(row["name"])[:20],
+                    "count": int(row["count"]),
+                    "total": float(row["total"]),
+                })
+            logger.info(f"品类统计 | {len(stats['cat_stats'])} 个品类")
+
+        # ========== 维度4：热销商品 TOP8 ==========
+        stats["prod_stats"] = []
+        if "商品名称" in recent_df.columns and "业绩金额" in recent_df.columns:
+            prod_grouped = recent_df.groupby("商品名称")["业绩金额"].agg(['count', 'sum']).reset_index()
+            prod_grouped.columns = ["name", "count", "total"]
+            prod_grouped["total"] = prod_grouped["total"].apply(lambda x: round(abs(float(x)), 2))
+            prod_grouped = prod_grouped.sort_values("total", ascending=False).head(8)
+            for _, row in prod_grouped.iterrows():
+                stats["prod_stats"].append({
+                    "name": str(row["name"])[:30],
+                    "count": int(row["count"]),
+                    "total": float(row["total"]),
+                })
+            logger.info(f"商品TOP{len(stats['prod_stats'])} | 已统计")
+
+        # ========== 维度5：旧料回收明细与盈亏分析 ==========
+        stats.update(self._calculate_recycle_stats(recent_df, date_col))
+
+        # 默认洞察（如果AI没有返回）
+        if "insights" not in stats:
+            stats["insights"] = self._generate_default_insights(stats)
 
         return stats
+
+    def _calculate_recycle_stats(self, df: pd.DataFrame, date_col: Optional[str]) -> Dict[str, Any]:
+        """
+        计算旧料回收相关统计数据
+
+        Args:
+            df: 已筛选的DataFrame
+            date_col: 日期列名
+
+        Returns:
+            回收统计字典
+        """
+        recycle_stats = {
+            "recycle_items": [],
+            "recycle_total_paid": 0,
+            "recycle_total_value": 0,
+            "recycle_total_pnl": 0,
+            "recycle_gold_g": 0,
+            "recycle_gold_paid": 0,
+            "recycle_gold_value": 0,
+            "recycle_gold_count": 0,
+            "recycle_silver_g": 0,
+            "recycle_silver_paid": 0,
+            "recycle_silver_value": 0,
+            "recycle_silver_count": 0,
+        }
+
+        # 筛选回收类型记录
+        if "销售类型" not in df.columns:
+            return recycle_stats
+
+        recycle_df = df[df["销售类型"] == "回收"].copy()
+        if len(recycle_df) == 0:
+            logger.info("无旧料回收数据")
+            return recycle_stats
+
+        # 确保数值列
+        for col in ["业绩金额", "金重", "银重"]:
+            if col in recycle_df.columns:
+                recycle_df[col] = pd.to_numeric(recycle_df[col], errors="coerce")
+
+        gold_g_total = 0
+        gold_paid_total = 0
+        gold_value_total = 0
+        gold_count = 0
+        silver_g_total = 0
+        silver_paid_total = 0
+        silver_value_total = 0
+        silver_count = 0
+
+        for idx, row in recycle_df.iterrows():
+            name = str(row.get("商品名称", ""))
+            # 判断金属类型
+            is_gold = any(kw in name for kw in ['金', 'AU', 'au', '素圈'])
+
+            if is_gold:
+                weight = abs(float(row.get("金重", 0) or 0))
+                metal_type = "gold"
+                price = self.gold_price
+                gold_count += 1
+                gold_g_total += weight
+                paid = abs(float(row.get("业绩金额", 0) or 0))
+                gold_paid_total += paid
+                value = weight * price
+                gold_value_total += value
+            else:
+                weight = abs(float(row.get("银重", 0) or 0))
+                metal_type = "silver"
+                price = self.silver_price
+                silver_count += 1
+                silver_g_total += weight
+                paid = abs(float(row.get("业绩金额", 0) or 0))
+                silver_paid_total += paid
+                value = weight * price
+                silver_value_total += value
+
+            pnl = value - paid
+
+            # 日期格式化
+            tx_date = row.get(date_col, "")
+            if hasattr(tx_date, 'strftime'):
+                tx_date = tx_date.strftime("%Y-%m-%d %H:%M")
+
+            recycle_stats["recycle_items"].append({
+                "date": str(tx_date),
+                "name": name[:30],
+                "metal": metal_type,
+                "weight": round(weight, 3),
+                "paid": round(paid, 2),
+                "value": round(value, 2),
+                "pnl": round(pnl, 2),
+                "price": price,
+            })
+
+        # 汇总
+        recycle_stats["recycle_total_paid"] = round(gold_paid_total + silver_paid_total, 2)
+        recycle_stats["recycle_total_value"] = round(gold_value_total + silver_value_total, 2)
+        recycle_stats["recycle_total_pnl"] = round(recycle_stats["recycle_total_value"] - recycle_stats["recycle_total_paid"], 2)
+        recycle_stats["recycle_gold_g"] = round(gold_g_total, 3)
+        recycle_stats["recycle_gold_paid"] = round(gold_paid_total, 2)
+        recycle_stats["recycle_gold_value"] = round(gold_value_total, 2)
+        recycle_stats["recycle_gold_count"] = gold_count
+        recycle_stats["recycle_silver_g"] = round(silver_g_total, 3)
+        recycle_stats["recycle_silver_paid"] = round(silver_paid_total, 2)
+        recycle_stats["recycle_silver_value"] = round(silver_value_total, 2)
+        recycle_stats["recycle_silver_count"] = silver_count
+
+        logger.info(f"回收统计 | 金:{gold_count}笔/{gold_g_total:.3f}g | 银:{silver_count}笔/{silver_g_total:.3f}g | 盈亏:¥{recycle_stats['recycle_total_pnl']:+,.2f}")
+        return recycle_stats
+
+    def _generate_default_insights(self, stats: Dict[str, Any]) -> List[str]:
+        """生成默认的业务洞察"""
+        insights = []
+
+        # 价格区间洞察
+        if stats.get("range_stats"):
+            top_range = max(stats["range_stats"], key=lambda x: x["total"])
+            total_rev = stats.get("total_revenue", 1)
+            pct = round(top_range["total"] / total_rev * 100, 1) if total_rev > 0 else 0
+            insights.append(f"最畅销的价格区间是「{top_range['range']}」，贡献了{pct}%的营业额（共{top_range['count']}笔交易）")
+
+        # 品类洞察
+        if stats.get("cat_stats"):
+            top_cat = stats["cat_stats"][0] if stats["cat_stats"] else None
+            if top_cat:
+                insights.append(f"核心品类为「{top_cat['name']}」，业绩达¥{top_cat['total']:,}，占总业绩比重最高")
+
+        # 回收业务洞察
+        if stats.get("recycle_total_pnl") is not None:
+            pnl = stats["recycle_total_pnl"]
+            if pnl > 0:
+                insights.append(f"旧料回收业务整体盈利 ¥{pnl:+,}，当前金属价格有利")
+            elif pnl < 0:
+                insights.append(f"旧料回收业务账面亏损 ¥{pnl:,}，属正常持仓浮亏（随金价波动）")
+            else:
+                insights.append("旧料回收业务暂无盈亏")
+
+        # 商品洞察
+        if stats.get("prod_stats"):
+            top_prod = stats["prod_stats"][0] if stats["prod_stats"] else None
+            if top_prod:
+                insights.append(f"热销商品TOP1：「{top_prod['name']}」，销量{top_prod['count']}件，业绩¥{top_prod['total']:,}")
+
+        if not insights:
+            insights.append("数据已加载，可进一步分析各维度趋势")
+
+        return insights
 
     def _get_empty_result(self) -> Dict[str, Any]:
         """返回空的结果模板"""
