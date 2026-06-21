@@ -1,0 +1,288 @@
+/* 全局样式 */
+* {
+    margin: 0;
+    padding: 0;
+    box-sizing: border-box;
+}
+
+body {
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", sans-serif;
+    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+    min-height: 100vh;
+    padding: 20px;
+}
+
+.container {
+    max-width: 1200px;
+    margin: 0 auto;
+}
+
+/* 头部 */
+header {
+    text-align: center;
+    color: white;
+    margin-bottom: 30px;
+    padding: 20px;
+}
+
+header h1 {
+    font-size: 2.5em;
+    margin-bottom: 10px;
+    text-shadow: 2px 2px 4px rgba(0,0,0,0.2);
+}
+
+.subtitle {
+    font-size: 1.1em;
+    opacity: 0.9;
+}
+
+/* 主内容区 */
+.main-content {
+    background: white;
+    border-radius: 20px;
+    padding: 30px;
+    box-shadow: 0 20px 60px rgba(0,0,0,0.3);
+}
+
+/* 上传区域 */
+.upload-section {
+    margin-bottom: 40px;
+}
+
+.upload-area {
+    border: 3px dashed #667eea;
+    border-radius: 15px;
+    padding: 60px 20px;
+    text-align: center;
+    cursor: pointer;
+    transition: all 0.3s;
+    background: #f8f9ff;
+}
+
+.upload-area:hover {
+    border-color: #764ba2;
+    background: #f0f2ff;
+}
+
+.upload-icon {
+    font-size: 4em;
+    margin-bottom: 20px;
+}
+
+.upload-area h2 {
+    color: #667eea;
+    margin-bottom: 10px;
+}
+
+.upload-area p {
+    color: #666;
+    margin-bottom: 20px;
+}
+
+/* 按钮 */
+.btn {
+    padding: 12px 30px;
+    border: none;
+    border-radius: 8px;
+    font-size: 1em;
+    cursor: pointer;
+    transition: all 0.3s;
+    font-weight: 600;
+}
+
+.btn-primary {
+    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+    color: white;
+}
+
+.btn-primary:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 5px 15px rgba(102, 126, 234, 0.4);
+}
+
+.btn-success {
+    background: #27ae60;
+    color: white;
+}
+
+.btn-secondary {
+    background: #95a5a6;
+    color: white;
+}
+
+/* 进度条 */
+.upload-progress {
+    margin-top: 20px;
+    padding: 20px;
+    background: #f8f9ff;
+    border-radius: 10px;
+}
+
+.progress-bar {
+    width: 100%;
+    height: 10px;
+    background: #e0e0e0;
+    border-radius: 5px;
+    overflow: hidden;
+    margin-bottom: 10px;
+}
+
+.progress-fill {
+    height: 100%;
+    background: linear-gradient(90deg, #667eea 0%, #764ba2 100%);
+    width: 0%;
+    transition: width 0.3s;
+}
+
+.progress-text {
+    text-align: center;
+    color: #667eea;
+    font-weight: 600;
+}
+
+/* 报告区域 */
+.report-section {
+    margin-bottom: 40px;
+    padding: 20px;
+    background: #f8f9ff;
+    border-radius: 15px;
+}
+
+.report-section h2 {
+    color: #667eea;
+    margin-bottom: 20px;
+}
+
+.report-frame {
+    width: 100%;
+    height: 600px;
+    border: 1px solid #ddd;
+    border-radius: 10px;
+    overflow: hidden;
+    margin-bottom: 20px;
+}
+
+#reportFrame {
+    width: 100%;
+    height: 100%;
+}
+
+.report-actions {
+    display: flex;
+    gap: 10px;
+    justify-content: center;
+}
+
+/* 历史记录 */
+.history-section h2 {
+    color: #667eea;
+    margin-bottom: 20px;
+}
+
+.history-list {
+    display: grid;
+    gap: 15px;
+}
+
+.history-item {
+    background: #f8f9ff;
+    padding: 20px;
+    border-radius: 10px;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    transition: all 0.3s;
+}
+
+.history-item:hover {
+    transform: translateX(5px);
+    box-shadow: 0 5px 15px rgba(0,0,0,0.1);
+}
+
+.history-info h3 {
+    color: #333;
+    margin-bottom: 5px;
+}
+
+.history-info p {
+    color: #666;
+    font-size: 0.9em;
+}
+
+.history-stats {
+    text-align: right;
+}
+
+.history-stats .revenue {
+    color: #e74c3c;
+    font-weight: 700;
+    font-size: 1.2em;
+}
+
+.history-stats .profit {
+    color: #27ae60;
+    font-weight: 600;
+}
+
+.empty-text {
+    text-align: center;
+    color: #999;
+    padding: 40px;
+}
+
+/* 分页 */
+.pagination {
+    display: flex;
+    justify-content: center;
+    gap: 10px;
+    margin-top: 20px;
+}
+
+.page-btn {
+    padding: 8px 15px;
+    border: 1px solid #667eea;
+    background: white;
+    color: #667eea;
+    border-radius: 5px;
+    cursor: pointer;
+    transition: all 0.3s;
+}
+
+.page-btn:hover {
+    background: #667eea;
+    color: white;
+}
+
+.page-btn.active {
+    background: #667eea;
+    color: white;
+}
+
+/* 响应式 */
+@media (max-width: 768px) {
+    header h1 {
+        font-size: 1.8em;
+    }
+    
+    .main-content {
+        padding: 20px;
+    }
+    
+    .upload-area {
+        padding: 40px 15px;
+    }
+    
+    .report-frame {
+        height: 400px;
+    }
+    
+    .history-item {
+        flex-direction: column;
+        text-align: center;
+    }
+    
+    .history-stats {
+        text-align: center;
+        margin-top: 10px;
+    }
+}

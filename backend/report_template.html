@@ -1,0 +1,229 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1.0,maximum-scale=1.0,user-scalable=no">
+<title>销售分析报告</title>
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+<style>
+  * { margin:0; padding:0; box-sizing:border-box; }
+  body { font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,"Noto Sans SC",sans-serif; background:#f5f6fa; color:#2d3436; -webkit-text-size-adjust:100%; }
+  .container { max-width:960px; margin:0 auto; padding:12px; }
+  .header { text-align:center; padding:18px 0 10px; }
+  .header h1 { font-size:20px; }
+  .header .time { font-size:12px; color:#b2bec3; margin-top:4px; }
+  .kpi-grid { display:grid; grid-template-columns:repeat(4,1fr); gap:10px; margin:14px 0; }
+  .kpi-card { background:white; border-radius:10px; padding:14px 12px; text-align:center; box-shadow:0 1px 4px rgba(0,0,0,0.06); }
+  .kpi-card .label { font-size:11px; color:#636e72; margin-bottom:4px; }
+  .kpi-card .value { font-size:22px; font-weight:700; }
+  .kpi-card .hint { font-size:10px; color:#b2bec3; margin-top:2px; }
+  .full-card { background:white; border-radius:10px; padding:16px; margin-bottom:14px; box-shadow:0 1px 4px rgba(0,0,0,0.06); }
+  .full-card h3 { font-size:15px; margin-bottom:10px; padding-bottom:6px; border-bottom:1px solid #f0f0f0; }
+  .chart-flex { display:flex; gap:14px; margin-top:10px; }
+  .chart-box { flex:1; background:white; border-radius:10px; padding:14px; box-shadow:0 1px 4px rgba(0,0,0,0.06); }
+  .chart-box h4 { font-size:13px; margin-bottom:8px; text-align:center; color:#636e72; }
+  table { width:100%; border-collapse:collapse; font-size:13px; }
+  th,td { padding:8px 10px; text-align:left; border-bottom:1px solid #f0f0f0; }
+  th { background:#f8f9fa; font-size:12px; color:#636e72; }
+  .num { text-align:right; }
+  .positive { color:#27ae60; font-weight:600; }
+  .negative { color:#e74c3c; font-weight:600; }
+  .medal { font-size:16px; }
+  .section-title { font-size:14px; font-weight:700; color:#2d3436; margin:14px 0 8px; padding-left:8px; border-left:3px solid #e74c3c; }
+  .profit-grid { display:grid; grid-template-columns:repeat(4,1fr); gap:10px; margin:10px 0; }
+  .profit-card { background:white; border-radius:8px; padding:12px; text-align:center; box-shadow:0 1px 3px rgba(0,0,0,0.05); }
+  .profit-card .plabel { font-size:11px; color:#636e72; }
+  .profit-card .pvalue { font-size:18px; font-weight:700; margin-top:2px; }
+  .clickable { cursor:pointer; }
+  .clickable:hover { background:#f8f9fa; }
+  .drill-row td { padding:0; }
+  .drill-inner { padding:10px 14px; background:#fafbfc; }
+  .drill-header { display:flex; justify-content:space-between; align-items:center; margin-bottom:8px; font-size:13px; font-weight:600; }
+  .drill-header .drill-label { color:#636e72; }
+  .drill-header .drill-value { color:#e74c3c; font-size:15px; }
+  .drill-header .drill-count { font-size:11px; color:#b2bec3; }
+  .drill-table { width:100%; font-size:12px; }
+  .drill-table th { background:#f0f0f0; font-size:11px; }
+  .drill-table td { padding:6px 8px; }
+  .cat-tag { display:inline-block; padding:2px 7px; border-radius:4px; font-size:11px; background:#dfe6e9; color:#636e72; }
+  @media(max-width:768px){
+    .kpi-grid,.profit-grid { grid-template-columns:repeat(2,1fr); }
+    .chart-flex { flex-direction:column; }
+    .table-wrap { overflow-x:auto; -webkit-overflow-scrolling:touch; }
+  }
+  @media(max-width:480px){
+    .container { padding:6px; }
+    .kpi-card .value { font-size:18px; }
+    .kpi-card { padding:10px 6px; }
+    h3,h4 { font-size:13px; }
+    th,td { padding:6px; font-size:12px; }
+  }
+</style>
+</head>
+<body>
+<div class="container">
+  <div class="header">
+    <h1>📊 销售分析报告</h1>
+    <div class="time" id="gen-time"></div>
+  </div>
+
+  <div class="kpi-grid">
+    <div class="kpi-card">
+      <div class="label">💰 营业总额（业绩）</div>
+      <div class="value" style="color:#e74c3c;" id="kpi-revenue"></div>
+      <div class="hint">净额（含退货）</div>
+    </div>
+    <div class="kpi-card">
+      <div class="label">📈 总利润</div>
+      <div class="value" style="color:#27ae60;" id="kpi-profit"></div>
+      <div class="hint">利润金额合计</div>
+    </div>
+    <div class="kpi-card">
+      <div class="label">🧮 销售笔数</div>
+      <div class="value" style="color:#3498db;" id="kpi-count"></div>
+      <div class="hint">近30天</div>
+    </div>
+    <div class="kpi-card">
+      <div class="label">📊 正向销售额</div>
+      <div class="value" style="color:#8e44ad;" id="kpi-sales"></div>
+      <div class="hint">不含退货</div>
+    </div>
+  </div>
+
+  <div class="section-title">📊 价格区间业绩排名</div>
+  <div class="full-card">
+    <div class="table-wrap">
+    <table>
+      <thead><tr><th>排名</th><th>价格区间</th><th>销量</th><th>业绩总额</th><th>均价</th></tr></thead>
+      <tbody id="range-tbody"></tbody>
+    </table>
+    </div>
+  </div>
+
+  <div class="chart-flex">
+    <div class="chart-box">
+      <h4>📊 品类业绩对比</h4>
+      <canvas id="chartCat"></canvas>
+    </div>
+    <div class="chart-box">
+      <h4>🏆 热销商品 TOP8</h4>
+      <canvas id="chartProd"></canvas>
+    </div>
+  </div>
+
+  <div class="section-title">🏆 品类销售明细</div>
+  <div class="full-card">
+    <div class="table-wrap">
+    <table>
+      <thead><tr><th>品类</th><th>销量</th><th>业绩总额</th></tr></thead>
+      <tbody id="cat-tbody"></tbody>
+    </table>
+    </div>
+  </div>
+
+  <div class="section-title">🏆 热销商品 TOP8</div>
+  <div class="full-card">
+    <div class="table-wrap">
+    <table>
+      <thead><tr><th>商品</th><th>销量</th><th>业绩总额</th></tr></thead>
+      <tbody id="prod-tbody"></tbody>
+    </table>
+    </div>
+  </div>
+
+  <div class="section-title">♻️ 旧料回收明细 & 盈亏分析</div>
+  <div class="full-card">
+    <div class="profit-grid" id="recycle-kpi"></div>
+    <div class="table-wrap" style="margin-top:12px;">
+    <table>
+      <thead><tr><th>类型</th><th>日期</th><th>商品名称</th><th>重量</th><th>回收支出</th><th>单价</th><th>当前市值</th><th>盈亏</th></tr></thead>
+      <tbody id="recycle-tbody"></tbody>
+    </table>
+    </div>
+  </div>
+</div>
+
+<script>
+var DATA = __DATA__PLACEHOLDER__;
+
+// 渲染基础KPI
+document.getElementById('gen-time').textContent = '生成时间：' + DATA.generate_time + '  ｜  数据范围：最近30天';
+document.getElementById('kpi-revenue').textContent = '¥' + DATA.total_revenue.toLocaleString();
+document.getElementById('kpi-profit').textContent = '¥' + DATA.total_profit.toLocaleString();
+document.getElementById('kpi-count').textContent = DATA.sales_count;
+document.getElementById('kpi-sales').textContent = '¥' + DATA.sales_revenue.toLocaleString();
+
+// 价格区间表格
+var rangeHtml = '';
+DATA.range_stats.forEach(function(item, i){
+  var medal = i===0?'🥇':i===1?'🥈':i===2?'🥉':(i+1);
+  rangeHtml += '<tr class="clickable" onclick="toggleDrill('+i+')"><td><span class="medal">'+medal+'</span></td><td><strong>'+item.range+'</strong></td><td>'+item.count+'笔</td><td class="num">¥'+item.total.toLocaleString()+'</td><td class="num">¥'+item.avg.toLocaleString()+'</td></tr>';
+  rangeHtml += '<tr id="drill-'+i+'" class="drill-row" style="display:none;"><td colspan="5"><div class="drill-inner"><div class="drill-header"><span class="drill-label">📋 '+item.range+' 区间交易明细</span><span class="drill-value">¥'+DATA.range_details[item.range].total_amount.toLocaleString()+'</span><span class="drill-count">共 '+DATA.range_details[item.range].count+' 笔</span></div><table class="drill-table"><thead><tr><th>#</th><th>日期</th><th>商品名称</th><th>品类</th><th>金额(¥)</th></tr></thead><tbody>';
+  DATA.range_details[item.range].transactions.forEach(function(tx, j){
+    rangeHtml += '<tr><td>'+(j+1)+'</td><td>'+tx.date+'</td><td>'+tx.name+'</td><td><span class="cat-tag">'+(tx.cat||'')+'</span></td><td class="num">¥'+tx.amount.toLocaleString()+'</td></tr>';
+  });
+  rangeHtml += '</tbody></table></div></td></tr>';
+});
+document.getElementById('range-tbody').innerHTML = rangeHtml;
+
+// 品类表格
+var catHtml = '';
+DATA.cat_stats.forEach(function(item){
+  catHtml += '<tr><td>'+item.name+'</td><td>'+item.count+'笔</td><td class="num">¥'+item.total.toLocaleString()+'</td></tr>';
+});
+document.getElementById('cat-tbody').innerHTML = catHtml;
+
+// 商品表格
+var prodHtml = '';
+DATA.prod_stats.forEach(function(item, i){
+  var medal = i===0?'🥇':i===1?'🥈':i===2?'🥉':'';
+  prodHtml += '<tr><td>'+medal+' '+item.name+'</td><td>'+item.count+'笔</td><td class="num">¥'+item.total.toLocaleString()+'</td></tr>';
+});
+document.getElementById('prod-tbody').innerHTML = prodHtml;
+
+// 回收KPI
+var goldPnl = DATA.recycle_gold_value - DATA.recycle_gold_paid;
+var silverPnl = DATA.recycle_silver_value - DATA.recycle_silver_paid;
+document.getElementById('recycle-kpi').innerHTML =
+  '<div class="profit-card"><div class="plabel">回收总支出</div><div class="pvalue" style="color:#e74c3c;">¥'+DATA.recycle_total_paid.toLocaleString()+'</div></div>' +
+  '<div class="profit-card"><div class="plabel">金价¥'+DATA.gold_price+'/g + 银价¥'+DATA.silver_price+'/g · 当前市值</div><div class="pvalue" style="color:#27ae60;">¥'+DATA.recycle_total_value.toLocaleString()+'</div></div>' +
+  '<div class="profit-card"><div class="plabel">账面盈亏</div><div class="pvalue" style="color:'+(DATA.recycle_total_pnl>=0?'#27ae60':'#e74c3c')+';">'+(DATA.recycle_total_pnl>=0?'+':'')+'¥'+DATA.recycle_total_pnl.toLocaleString()+'</div></div>' +
+  '<div class="profit-card"><div class="plabel">回收总重量</div><div class="pvalue" style="color:#8e44ad;">'+(DATA.recycle_gold_g+DATA.recycle_silver_g).toFixed(3)+'g</div></div>' +
+  '<div style="background:#fffdf5;border:1px solid #f0e6c8;border-radius:10px;padding:14px 18px;grid-column:1/span 2;"><div style="font-size:12px;color:#b8860b;margin-bottom:4px;">🟡 黄金回收（'+DATA.recycle_gold_count+'笔）</div><div style="display:flex;gap:20px;align-items:baseline;"><div><div style="font-size:11px;color:#636e72;">回收重量</div><div style="font-size:20px;font-weight:700;color:#b8860b;">'+DATA.recycle_gold_g.toFixed(3)+'g</div></div><div><div style="font-size:11px;color:#636e72;">回收支出</div><div style="font-size:20px;font-weight:700;color:#e74c3c;">¥'+DATA.recycle_gold_paid.toLocaleString()+'</div></div><div><div style="font-size:11px;color:#636e72;">金价¥'+DATA.gold_price+'/g · 当前市值</div><div style="font-size:20px;font-weight:700;color:#27ae60;">¥'+DATA.recycle_gold_value.toLocaleString()+'</div></div><div><div style="font-size:11px;color:#636e72;">盈亏</div><div style="font-size:20px;font-weight:700;color:'+(goldPnl>=0?'#27ae60':'#e74c3c')+';">'+(goldPnl>=0?'+':'')+'¥'+goldPnl.toLocaleString()+'</div></div></div></div>' +
+  '<div style="background:#f9f9fc;border:1px solid #e8e8f0;border-radius:10px;padding:14px 18px;grid-column:3/span 2;"><div style="font-size:12px;color:#7f8c8d;margin-bottom:4px;">⚪ 白银回收（'+DATA.recycle_silver_count+'笔）</div><div style="display:flex;gap:20px;align-items:baseline;"><div><div style="font-size:11px;color:#636e72;">回收重量</div><div style="font-size:20px;font-weight:700;color:#7f8c8d;">'+DATA.recycle_silver_g.toFixed(3)+'g</div></div><div><div style="font-size:11px;color:#636e72;">回收支出</div><div style="font-size:20px;font-weight:700;color:#e74c3c;">¥'+DATA.recycle_silver_paid.toLocaleString()+'</div></div><div><div style="font-size:11px;color:#636e72;">银价¥'+DATA.silver_price+'/g · 当前市值</div><div style="font-size:20px;font-weight:700;color:#27ae60;">¥'+DATA.recycle_silver_value.toLocaleString()+'</div></div><div><div style="font-size:11px;color:#636e72;">盈亏</div><div style="font-size:20px;font-weight:700;color:'+(silverPnl>=0?'#27ae60':'#e74c3c')+';">'+(silverPnl>=0?'+':'')+'¥'+silverPnl.toLocaleString()+'</div></div></div></div>';
+
+// 回收表格
+var recHtml = '';
+DATA.recycle_items.forEach(function(item, i){
+  var icon = item.metal==='gold'?'🟡':'⚪';
+  var pnlCls = item.pnl>=0?'positive':'negative';
+  var pnlSign = item.pnl>=0?'+':'';
+  var priceLabel = item.metal==='gold'?'金价':'银价';
+  recHtml += '<tr class="clickable" onclick="toggleRecDrill('+i+')"><td>'+icon+'</td><td>'+item.date+'</td><td>'+item.name+'</td><td>'+item.weight.toFixed(3)+'g</td><td class="negative">¥'+item.paid.toLocaleString()+'</td><td>'+priceLabel+'¥'+item.price+'/g</td><td class="positive">¥'+item.value.toLocaleString()+'</td><td class="'+pnlCls+'">'+pnlSign+'¥'+item.pnl.toLocaleString()+'</td></tr>';
+  recHtml += '<tr id="rec-drill-'+i+'" class="drill-row" style="display:none;"><td colspan="8"><div class="drill-inner" style="padding:10px 14px;"><div style="display:flex;gap:15px;flex-wrap:wrap;"><div style="background:#fffdf5;border-radius:6px;padding:8px 12px;"><span style="font-size:11px;color:#b8860b;">回收克价</span><div style="font-size:15px;font-weight:700;color:#b8860b;">¥'+(item.paid/item.weight).toFixed(0)+'/g</div></div><div style="background:#f0fff0;border-radius:6px;padding:8px 12px;"><span style="font-size:11px;color:#27ae60;">'+priceLabel+'¥'+item.price+'/g · 当前市值</span><div style="font-size:15px;font-weight:700;color:#27ae60;">¥'+item.value.toLocaleString()+'</div></div><div style="background:#f8f9fa;border-radius:6px;padding:8px 12px;"><span style="font-size:11px;color:#636e72;">重量差价</span><div style="font-size:15px;font-weight:700;color:#636e72;">¥'+(item.price - item.paid/item.weight).toFixed(1)+'/g</div></div></div></div></td></tr>';
+});
+document.getElementById('recycle-tbody').innerHTML = recHtml;
+
+// 图表
+new Chart(document.getElementById('chartCat'), {
+  type:'bar',
+  data:{ labels:DATA.cat_stats.map(function(c){return c.name;}), datasets:[{ label:'业绩金额(¥)', data:DATA.cat_stats.map(function(c){return c.total;}), backgroundColor:['#e74c3c','#8e44ad','#f39c12','#1abc9c','#3498db','#95a5a6','#e67e22','#636e72'], borderRadius:6 }] },
+  options:{ responsive:true, plugins:{ legend:{display:false} }, scales:{ y:{ ticks:{ callback:function(v){return '¥'+v.toLocaleString();} } } } }
+});
+new Chart(document.getElementById('chartProd'), {
+  type:'bar',
+  data:{ labels:DATA.prod_stats.map(function(p){return p.name;}), datasets:[{ label:'业绩(¥)', data:DATA.prod_stats.map(function(p){return p.total;}), backgroundColor:'#3498db', borderRadius:6, yAxisID:'y' },{ label:'销量(件)', data:DATA.prod_stats.map(function(p){return p.count;}), backgroundColor:'#e74c3c', borderRadius:6, yAxisID:'y1' }] },
+  options:{ responsive:true, plugins:{ legend:{ position:'bottom', labels:{ boxWidth:12, font:{size:11} } } }, scales:{ y:{ type:'linear', position:'left', ticks:{ callback:function(v){return '¥'+v.toLocaleString();}, font:{size:10} }, grid:{ drawOnChartArea:true } }, y1:{ type:'linear', position:'right', ticks:{ callback:function(v){return v+'件';}, font:{size:10} }, grid:{ drawOnChartArea:false } } } }
+});
+
+function toggleDrill(idx){
+  var el = document.getElementById('drill-'+idx);
+  el.style.display = el.style.display==='none'?'table-row':'none';
+}
+function toggleRecDrill(idx){
+  var el = document.getElementById('rec-drill-'+idx);
+  el.style.display = el.style.display==='none'?'table-row':'none';
+}
+</script>
+</body>
+</html>
