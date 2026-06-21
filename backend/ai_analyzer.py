@@ -581,20 +581,21 @@ class AISalesAnalyzer:
         revenue_series = recent_df["业绩金额"].dropna() if "业绩金额" in recent_df.columns else pd.Series([])
         profit_series = recent_df["利润金额"].dropna() if "利润金额" in recent_df.columns else pd.Series([])
 
-        stats["total_revenue"] = round(float(abs(revenue_series).sum()), 2) if len(revenue_series) > 0 else 0
-        stats["total_profit"] = round(float(profit_series.sum()), 2) if len(profit_series) > 0 else 0
-
-        # 销售笔数（业绩金额>0的记录）
+        # 营业总额 = 正向业绩金额合计（不含回收/退货等负值）
         if len(revenue_series) > 0:
-            stats["sales_count"] = int((revenue_series > 0).sum())
-            # 正向销售额（不含退货/回收等负值记录）
             positive_revenue = revenue_series[revenue_series > 0]
-            stats["sales_revenue"] = round(float(positive_revenue.sum()), 2) if len(positive_revenue) > 0 else 0
+            stats["total_revenue"] = round(float(positive_revenue.sum()), 2) if len(positive_revenue) > 0 else 0
+            stats["sales_count"] = int(len(positive_revenue))
+            stats["sales_revenue"] = stats["total_revenue"]  # 与营业额一致
         else:
+            stats["total_revenue"] = 0
             stats["sales_count"] = 0
             stats["sales_revenue"] = 0
 
-        logger.info(f"基础KPI | 营业额: ¥{stats['total_revenue']:,} | 利润: ¥{stats['total_profit']:,} | 笔数: {stats['sales_count']}")
+        # 利润 = 全部利润金额合计（含正负）
+        stats["total_profit"] = round(float(profit_series.sum()), 2) if len(profit_series) > 0 else 0
+
+        logger.info(f"基础KPI | 营业总额: ¥{stats['total_revenue']:,} | 利润: ¥{stats['total_profit']:,} | 笔数: {stats['sales_count']}")
 
         # ========== 维度2：价格区间业绩排名 ==========
         stats["range_stats"] = []
