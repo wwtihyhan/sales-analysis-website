@@ -8,11 +8,17 @@ services:
     envVars:
       - key: PYTHON_VERSION
         value: "3.13"
+      - key: MINIMAX_API_KEY
+        sync: false  # 需要手动在 Dashboard 设置
+      - key: DEFAULT_GOLD_PRICE
+        value: "930"
+      - key: DEFAULT_SILVER_PRICE
+        value: "17"
       - key: DATABASE_URL
         fromDatabase:
           name: sales-db
           property: connectionString
 
-  - type: postgres
-    name: sales-db
+databases:
+  - name: sales-db
     plan: free
