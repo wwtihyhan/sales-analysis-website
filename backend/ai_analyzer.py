@@ -685,6 +685,7 @@ class AISalesAnalyzer:
 
         # ========== 维度3：品类业绩对比 ==========
         stats["cat_stats"] = []
+        stats["cat_details"] = {}
         if "小类" in recent_df.columns and "eff_rev" in recent_df.columns:
             cat_grouped = recent_df.groupby("小类")["eff_rev"].agg(["count", "sum"]).reset_index()
             cat_grouped.columns = ["name", "count", "total"]
@@ -693,15 +694,34 @@ class AISalesAnalyzer:
             cat_grouped["total"] = cat_grouped["total"].apply(lambda x: round(abs(float(x)), 2))
             cat_grouped = cat_grouped.sort_values("total", ascending=False)
             for _, row in cat_grouped.iterrows():
+                cat_name = str(row["name"])[:20]
                 stats["cat_stats"].append({
-                    "name": str(row["name"])[:20],
+                    "name": cat_name,
                     "count": int(row["count"]),
                     "total": float(row["total"]),
                 })
+                # 收集该品类的详细交易（最多30条）
+                cat_df = recent_df[recent_df["小类"] == row["name"]]
+                transactions = []
+                for _, tx_row in cat_df.head(30).iterrows():
+                    tx_date = tx_row.get(date_col, "")
+                    if hasattr(tx_date, "strftime"):
+                        tx_date = tx_date.strftime("%Y-%m-%d %H:%M")
+                    transactions.append({
+                        "date": str(tx_date),
+                        "name": str(tx_row.get("商品名称", ""))[:30],
+                        "amount": round(float(tx_row.get("eff_rev", 0)), 2),
+                    })
+                stats["cat_details"][cat_name] = {
+                    "total_amount": float(row["total"]),
+                    "count": int(row["count"]),
+                    "transactions": transactions,
+                }
             logger.info(f"品类统计 | {len(stats['cat_stats'])} 个品类")
 
         # ========== 维度4：热销商品 TOP8 ==========
         stats["prod_stats"] = []
+        stats["prod_details"] = {}
         if "商品名称" in recent_df.columns and "eff_rev" in recent_df.columns:
             prod_grouped = recent_df.groupby("商品名称")["eff_rev"].agg(["count", "sum"]).reset_index()
             prod_grouped.columns = ["name", "count", "total"]
@@ -709,11 +729,29 @@ class AISalesAnalyzer:
             prod_grouped["total"] = prod_grouped["total"].apply(lambda x: round(abs(float(x)), 2))
             prod_grouped = prod_grouped.sort_values("total", ascending=False).head(8)
             for _, row in prod_grouped.iterrows():
+                prod_name = str(row["name"])[:30]
                 stats["prod_stats"].append({
-                    "name": str(row["name"])[:30],
+                    "name": prod_name,
                     "count": int(row["count"]),
                     "total": float(row["total"]),
                 })
+                # 收集该商品的详细交易（最多30条）
+                prod_df = recent_df[recent_df["商品名称"] == row["name"]]
+                transactions = []
+                for _, tx_row in prod_df.head(30).iterrows():
+                    tx_date = tx_row.get(date_col, "")
+                    if hasattr(tx_date, "strftime"):
+                        tx_date = tx_date.strftime("%Y-%m-%d %H:%M")
+                    transactions.append({
+                        "date": str(tx_date),
+                        "cat": str(tx_row.get("小类", ""))[:20],
+                        "amount": round(float(tx_row.get("eff_rev", 0)), 2),
+                    })
+                stats["prod_details"][prod_name] = {
+                    "total_amount": float(row["total"]),
+                    "count": int(row["count"]),
+                    "transactions": transactions,
+                }
             logger.info(f"商品TOP{len(stats['prod_stats'])} | 已统计")
 
         # ========== 维度5：旧料回收明细与盈亏分析 ==========
@@ -945,7 +983,9 @@ class AISalesAnalyzer:
             "range_stats": [],
             "range_details": {},
             "cat_stats": [],
+            "cat_details": {},
             "prod_stats": [],
+            "prod_details": {},
             "recycle_items": [],
             "recycle_total_paid": 0,
             "recycle_total_value": 0,

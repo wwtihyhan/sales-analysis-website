@@ -115,7 +115,7 @@
   <div class="full-card">
     <div class="table-wrap">
     <table>
-      <thead><tr><th>品类</th><th>销量</th><th>业绩总额</th></tr></thead>
+      <thead><tr><th>品类</th><th>销量</th><th class="num">业绩总额</th></tr></thead>
       <tbody id="cat-tbody"></tbody>
     </table>
     </div>
@@ -125,7 +125,7 @@
   <div class="full-card">
     <div class="table-wrap">
     <table>
-      <thead><tr><th>商品</th><th>销量</th><th>业绩总额</th></tr></thead>
+      <thead><tr><th>商品</th><th>销量</th><th class="num">业绩总额</th></tr></thead>
       <tbody id="prod-tbody"></tbody>
     </table>
     </div>
@@ -173,18 +173,34 @@ DATA.range_stats.forEach(function(item, i){
 });
 document.getElementById('range-tbody').innerHTML = rangeHtml;
 
-// 品类表格
+// 品类表格（支持下钻）
 var catHtml = '';
-DATA.cat_stats.forEach(function(item){
-  catHtml += '<tr><td>'+item.name+'</td><td>'+item.count+'笔</td><td class="num">¥'+item.total.toLocaleString()+'</td></tr>';
+DATA.cat_stats.forEach(function(item, i){
+  catHtml += '<tr class="clickable" onclick="toggleCatDrill('+i+')"><td><strong>'+item.name+'</strong></td><td>'+item.count+'笔</td><td class="num">¥'+item.total.toLocaleString()+'</td></tr>';
+  if(DATA.cat_details && DATA.cat_details[item.name]){
+    var detail = DATA.cat_details[item.name];
+    catHtml += '<tr id="cat-drill-'+i+'" class="drill-row" style="display:none;"><td colspan="3"><div class="drill-inner"><div class="drill-header"><span class="drill-label">📋 '+item.name+' 品类交易明细</span><span class="drill-value">¥'+detail.total_amount.toLocaleString()+'</span><span class="drill-count">共 '+detail.count+' 笔</span></div><table class="drill-table"><thead><tr><th>#</th><th>日期</th><th>商品名称</th><th class="num">金额(¥)</th></tr></thead><tbody>';
+    detail.transactions.forEach(function(tx, j){
+      catHtml += '<tr><td>'+(j+1)+'</td><td>'+tx.date+'</td><td>'+tx.name+'</td><td class="num">¥'+tx.amount.toLocaleString()+'</td></tr>';
+    });
+    catHtml += '</tbody></table></div></td></tr>';
+  }
 });
 document.getElementById('cat-tbody').innerHTML = catHtml;
 
-// 商品表格
+// 商品表格（支持下钻）
 var prodHtml = '';
 DATA.prod_stats.forEach(function(item, i){
   var medal = i===0?'🥇':i===1?'🥈':i===2?'🥉':'';
-  prodHtml += '<tr><td>'+medal+' '+item.name+'</td><td>'+item.count+'笔</td><td class="num">¥'+item.total.toLocaleString()+'</td></tr>';
+  prodHtml += '<tr class="clickable" onclick="toggleProdDrill('+i+')"><td>'+medal+' '+item.name+'</td><td>'+item.count+'笔</td><td class="num">¥'+item.total.toLocaleString()+'</td></tr>';
+  if(DATA.prod_details && DATA.prod_details[item.name]){
+    var detail = DATA.prod_details[item.name];
+    prodHtml += '<tr id="prod-drill-'+i+'" class="drill-row" style="display:none;"><td colspan="3"><div class="drill-inner"><div class="drill-header"><span class="drill-label">📋 '+item.name+' 商品交易明细</span><span class="drill-value">¥'+detail.total_amount.toLocaleString()+'</span><span class="drill-count">共 '+detail.count+' 笔</span></div><table class="drill-table"><thead><tr><th>#</th><th>日期</th><th>品类</th><th class="num">金额(¥)</th></tr></thead><tbody>';
+    detail.transactions.forEach(function(tx, j){
+      prodHtml += '<tr><td>'+(j+1)+'</td><td>'+tx.date+'</td><td><span class="cat-tag">'+(tx.cat||'')+'</span></td><td class="num">¥'+tx.amount.toLocaleString()+'</td></tr>';
+    });
+    prodHtml += '</tbody></table></div></td></tr>';
+  }
 });
 document.getElementById('prod-tbody').innerHTML = prodHtml;
 
@@ -245,6 +261,14 @@ function toggleDrill(idx){
 }
 function toggleRecDrill(idx){
   var el = document.getElementById('rec-drill-'+idx);
+  el.style.display = el.style.display==='none'?'table-row':'none';
+}
+function toggleCatDrill(idx){
+  var el = document.getElementById('cat-drill-'+idx);
+  el.style.display = el.style.display==='none'?'table-row':'none';
+}
+function toggleProdDrill(idx){
+  var el = document.getElementById('prod-drill-'+idx);
   el.style.display = el.style.display==='none'?'table-row':'none';
 }
 </script>
