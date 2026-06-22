@@ -124,7 +124,18 @@ class AISalesAnalyzer:
 
         # Step 6: 合并AI洞察（如果AI返回了有效数据）
         if ai_result and ai_result.get("insights"):
-            analysis_result["insights"] = ai_result["insights"]
+            ai_insights = ai_result["insights"]
+            # 校验：过滤掉错误类消息，保留有效的业务洞察
+            error_keywords = ["未提供", "无效", "不可用", "失败", "错误", "error", "无法", "暂无"]
+            valid_insights = [
+                ins for ins in ai_insights
+                if not any(kw in str(ins).lower() for kw in error_keywords)
+            ]
+            if valid_insights:
+                analysis_result["insights"] = valid_insights
+                logger.info(f"使用 AI 洞察: {len(valid_insights)} 条")
+            else:
+                logger.warning(f"AI 返回的洞察全是错误信息，使用 Pandas 默认洞察")
         # 如果Pandas计算的某些字段为空但AI有数据，用AI补充
         for key in ["range_stats", "cat_stats", "prod_stats", "recycle_items"]:
             if not analysis_result.get(key) and ai_result.get(key):
