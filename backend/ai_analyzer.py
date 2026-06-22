@@ -107,54 +107,21 @@ class AISalesAnalyzer:
         df = self._read_excel(file_path)
         logger.info(f"成功读取 {len(df)} 条记录")
 
-        # Step 2: 转换为文本格式
+        # Step 2: 转换为文本格式（保留用于日志）
         data_text = self._format_data_for_ai(df)
         logger.info(f"数据格式化完成 | 文本长度: {len(data_text)} 字符")
 
-        # Step 3: 构建 Prompt
-        prompt = self._build_analysis_prompt(df, data_text)
-        logger.info(f"Prompt 构建完成 | 长度: {len(prompt)} 字符")
-
-        # Step 4: 调用 AI 分析（获取业务洞察）
-        ai_result = self._call_ai_api(prompt)
+        # Step 3-4: 跳过AI调用（AI会产生虚假数据，改用纯数据驱动分析）
+        ai_result = None
+        logger.info("已禁用AI洞察 | 使用纯Pandas数据驱动分析")
 
         # Step 5: 用 Pandas 计算完整的结构化数据（核心数据源）
         pandas_stats = self._calculate_full_stats(df)
         analysis_result = pandas_stats
 
-        # Step 6: 合并AI洞察（如果AI返回了有效数据）
-        if ai_result and ai_result.get("insights"):
-            ai_insights = ai_result["insights"]
-            # 校验：过滤掉错误类/系统提示类消息，只保留真正的业务洞察
-            error_keywords = [
-                # 明确的错误关键词
-                "未提供", "无效", "不可用", "失败", "错误", "error", "无法", "暂无",
-                # AI分析失败时的系统提示语（不是业务洞察）
-                "请检查", "数据格式", "建议提供", "数据就绪", "时间窗口完整",
-                "字段是否存在", "无空值", "重点关注回收业务的盈亏情况",
-                # 其他非洞察性内容
-                "请确保", "无法完成", "需要更多", "缺少必要",
-            ]
-            import re
-            valid_insights = []
-            for ins in ai_insights:
-                ins_str = str(ins)
-                is_error = any(kw in ins_str for kw in error_keywords)
-                # 额外校验：真正的业务洞察应包含数字、金额或具体商品名
-                has_business_data = bool(re.search(r'¥\d+|\d+%\d*|\d+笔|\d+件|[\d,]+元|[「」].+[」』]', ins_str))
-                if not is_error and has_business_data:
-                    valid_insights.append(ins)
-                else:
-                    logger.info(f"过滤AI洞察(非业务数据): {ins_str[:50]}")
-            if valid_insights:
-                analysis_result["insights"] = valid_insights
-                logger.info(f"使用 AI 洞察: {len(valid_insights)} 条")
-            else:
-                logger.warning(f"AI 返回的洞察全部被过滤，使用 Pandas 默认洞察")
-        # 如果Pandas计算的某些字段为空但AI有数据，用AI补充
-        for key in ["range_stats", "cat_stats", "prod_stats", "recycle_items"]:
-            if not analysis_result.get(key) and ai_result.get(key):
-                analysis_result[key] = ai_result[key]
+        # Step 6: 使用Panas计算的默认洞察（数据100%准确）
+        analysis_result["insights"] = self._generate_default_insights(pandas_stats)
+        logger.info(f"使用 Pandas 数据驱动洞察: {len(analysis_result['insights'])} 条")
 
         # Step 7: 生成 HTML 报告
         report_html = self._generate_report(analysis_result)
@@ -717,7 +684,7 @@ class AISalesAnalyzer:
                     "count": int(row["count"]),
                     "transactions": transactions,
                 }
-            logger.info(f"品类统计 | {len(stats['cat_stats'])} 个品类")
+            logger.info(f"品类统计 | {len(stats['cat_stats'])} 个品类 | 详情: {len(stats['cat_details'])} 组")
 
         # ========== 维度4：热销商品 TOP8 ==========
         stats["prod_stats"] = []
@@ -752,7 +719,7 @@ class AISalesAnalyzer:
                     "count": int(row["count"]),
                     "transactions": transactions,
                 }
-            logger.info(f"商品TOP{len(stats['prod_stats'])} | 已统计")
+            logger.info(f"商品TOP{len(stats['prod_stats'])} | 已统计 | 详情: {len(stats['prod_details'])} 组")
 
         # ========== 维度5：旧料回收明细与盈亏分析 ==========
         stats.update(self._calculate_recycle_stats(recent_df, date_col))
@@ -936,40 +903,130 @@ class AISalesAnalyzer:
         return recycle_stats
 
     def _generate_default_insights(self, stats: Dict[str, Any]) -> List[str]:
-        """生成默认的业务洞察"""
+        """
+        生成基于真实数据的业务洞察（100%数据准确）
+
+        所有数字均来自 Pandas 计算结果，不依赖AI生成
+        """
         insights = []
+        rev = stats.get("total_revenue", 0)
+        profit = stats.get("total_profit", 0)
+        count = stats.get("sales_count", 0)
 
-        # 价格区间洞察
-        if stats.get("range_stats"):
-            top_range = max(stats["range_stats"], key=lambda x: x["total"])
-            total_rev = stats.get("total_revenue", 1)
-            pct = round(top_range["total"] / total_rev * 100, 1) if total_rev > 0 else 0
-            insights.append(f"最畅销的价格区间是「{top_range['range']}」，贡献了{pct}%的营业额（共{top_range['count']}笔交易）")
+        # 洞察1：整体业绩概览
+        if count > 0:
+            avg_order = round(rev / count, 2)
+            profit_rate = round(profit / rev * 100, 1) if rev > 0 else 0
+            insights.append(
+                f"📊 近30天业绩总览：营业额 ¥{rev:,} | "
+                f"总利润 ¥{profit:,}（利润率 {profit_rate}%）| "
+                f"销售 {count} 笔 | 均价 ¥{avg_order:,}"
+            )
 
-        # 品类洞察
-        if stats.get("cat_stats"):
-            top_cat = stats["cat_stats"][0] if stats["cat_stats"] else None
-            if top_cat:
-                insights.append(f"核心品类为「{top_cat['name']}」，业绩达¥{top_cat['total']:,}，占总业绩比重最高")
+        # 洞察2：价格区间分析
+        if stats.get("range_stats") and len(stats["range_stats"]) > 0:
+            sorted_ranges = sorted(stats["range_stats"], key=lambda x: x["total"], reverse=True)
+            top = sorted_ranges[0]
+            bottom = sorted_ranges[-1] if sorted_ranges[-1]["total"] > 0 else None
 
-        # 回收业务洞察
-        if stats.get("recycle_total_pnl") is not None:
-            pnl = stats["recycle_total_pnl"]
-            if pnl > 0:
-                insights.append(f"旧料回收业务整体盈利 ¥{pnl:+,}，当前金属价格有利")
-            elif pnl < 0:
-                insights.append(f"旧料回收业务账面亏损 ¥{pnl:,}，属正常持仓浮亏（随金价波动）")
-            else:
-                insights.append("旧料回收业务暂无盈亏")
+            top_pct = round(top["total"] / rev * 100, 1) if rev > 0 else 0
+            insight = (
+                f"💰 价格区间表现：TOP1「{top['range']}」贡献 ¥{top['total']:,}（{top_pct}%）"
+            )
+            if bottom and bottom["total"] < top["total"]:
+                bottom_pct = round(bottom["total"] / rev * 100, 1) if rev > 0 else 0
+                insight += f" | 最低「{bottom['range']}」仅 {bottom_pct}%"
+            insights.append(insight)
 
-        # 商品洞察
-        if stats.get("prod_stats"):
-            top_prod = stats["prod_stats"][0] if stats["prod_stats"] else None
-            if top_prod:
-                insights.append(f"热销商品TOP1：「{top_prod['name']}」，销量{top_prod['count']}件，业绩¥{top_prod['total']:,}")
+        # 洞察3：品类分析
+        if stats.get("cat_stats") and len(stats["cat_stats"]) > 0:
+            cats = stats["cat_stats"]
+            total_cat_rev = sum(c["total"] for c in cats)
 
+            # TOP3 品类
+            top3 = cats[:3]
+            cat_detail = " | ".join(
+                [f"「{c['name']}」¥{c['total']:,}({c['count']}笔)" for c in top3]
+            )
+            insights.append(f"🏷️ 品类TOP3：{cat_detail}")
+
+            # 如果有多个品类，分析集中度
+            if len(cats) > 1:
+                top1_pct = round(cats[0]["total"] / total_cat_rev * 100, 1) if total_cat_rev > 0 else 0
+                if top1_pct >= 50:
+                    insights.append(
+                        f"⚠️ 品类风险提示：「{cats[0]['name']}」占营收 {top1_pct}%，"
+                        "建议拓展其他品类降低单一依赖"
+                    )
+
+        # 洞察4：商品分析
+        if stats.get("prod_stats") and len(stats["prod_stats"]) > 0:
+            prods = stats["prod_stats"]
+            top_prod = prods[0]
+
+            # 热销商品详情
+            prod_avg = round(top_prod["total"] / top_prod["count"], 2) if top_prod["count"] > 0 else 0
+            insights.append(
+                f"🏆 爆款商品：「{top_prod['name']}」销量 {top_prod['count']} 件，"
+                f"业绩 ¥{top_prod['total']:,}，均价 ¥{prod_avg:,}"
+            )
+
+            # 如果TOP8中有明显差距
+            if len(prods) >= 2:
+                gap = round((prods[0]["total"] - prods[-1]["total"]) / prods[0]["total"] * 100, 1) if prods[0]["total"] > 0 else 0
+                if gap > 80:
+                    insights.append(
+                        f"📉 商品分化明显：TOP1与末位业绩差距 {gap}%，"
+                        "可考虑优化滞销品或加大爆品推广"
+                    )
+
+        # 洞察5：回收业务分析
+        if stats.get("recycle_total_paid", 0) > 0:
+            recycle_pnl = stats.get("recycle_total_pnl", 0)
+            recycle_gold_g = stats.get("recycle_gold_g", 0)
+            recycle_silver_g = stats.get("recycle_silver_g", 0)
+            recycle_gold_count = stats.get("recycle_gold_count", 0)
+            recycle_silver_count = stats.get("recycle_silver_count", 0)
+
+            if recycle_pnl > 0:
+                insights.append(
+                    f"♻️ 回收盈利中：账面盈亏 ¥{recycle_pnl:+,} | "
+                    f"黄金 {recycle_gold_g:.1f}g({recycle_gold_count}笔) + "
+                    f"白银 {recycle_silver_g:.1f}g({recycle_silver_count}笔)"
+                )
+            elif recycle_pnl < 0:
+                insights.append(
+                    f"♻️ 回收持仓浮亏：账面 ¥{recycle_pnl:,}（随金属价格波动）| "
+                    f"持有黄金 {recycle_gold_g:.1f}g + 白银 {recycle_silver_g:.1f}g"
+                )
+
+        # 洞察6：客单价与效率分析（如果数据足够）
+        if count >= 5:
+            # 计算价格区间分布是否健康
+            if stats.get("range_stats"):
+                high_range_sum = sum(
+                    r["total"] for r in stats["range_stats"]
+                    if r["range"] in ["2000-5000元", "5000元以上"]
+                )
+                low_range_sum = sum(
+                    r["total"] for r in stats["range_stats"]
+                    if r["range"] in ["0-100元", "100-300元"]
+                )
+
+                if high_range_sum > low_range_sum and (high_range_sum + low_range_sum) > 0:
+                    high_pct = round(high_range_sum / (high_range_sum + low_range_sum) * 100, 1)
+                    insights.append(
+                        f"📈 客单价结构健康：高价位(≥2000元)占比 {high_pct}%，"
+                        "客户消费能力较强"
+                    )
+                elif low_range_sum > 0 and high_range_sum == 0:
+                    insights.append(
+                        "💡 提升建议：当前订单集中在低价位区，可考虑推出高附加值产品或组合套餐提升客单价"
+                    )
+
+        # 兜底：如果没有生成任何洞察
         if not insights:
-            insights.append("数据已加载，可进一步分析各维度趋势")
+            insights.append("✅ 数据已加载完成，所有指标基于实际交易数据计算")
 
         return insights
 
