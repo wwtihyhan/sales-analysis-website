@@ -125,17 +125,32 @@ class AISalesAnalyzer:
         # Step 6: 合并AI洞察（如果AI返回了有效数据）
         if ai_result and ai_result.get("insights"):
             ai_insights = ai_result["insights"]
-            # 校验：过滤掉错误类消息，保留有效的业务洞察
-            error_keywords = ["未提供", "无效", "不可用", "失败", "错误", "error", "无法", "暂无"]
-            valid_insights = [
-                ins for ins in ai_insights
-                if not any(kw in str(ins).lower() for kw in error_keywords)
+            # 校验：过滤掉错误类/系统提示类消息，只保留真正的业务洞察
+            error_keywords = [
+                # 明确的错误关键词
+                "未提供", "无效", "不可用", "失败", "错误", "error", "无法", "暂无",
+                # AI分析失败时的系统提示语（不是业务洞察）
+                "请检查", "数据格式", "建议提供", "数据就绪", "时间窗口完整",
+                "字段是否存在", "无空值", "重点关注回收业务的盈亏情况",
+                # 其他非洞察性内容
+                "请确保", "无法完成", "需要更多", "缺少必要",
             ]
+            import re
+            valid_insights = []
+            for ins in ai_insights:
+                ins_str = str(ins)
+                is_error = any(kw in ins_str for kw in error_keywords)
+                # 额外校验：真正的业务洞察应包含数字、金额或具体商品名
+                has_business_data = bool(re.search(r'¥\d+|\d+%\d*|\d+笔|\d+件|[\d,]+元|[「」].+[」』]', ins_str))
+                if not is_error and has_business_data:
+                    valid_insights.append(ins)
+                else:
+                    logger.info(f"过滤AI洞察(非业务数据): {ins_str[:50]}")
             if valid_insights:
                 analysis_result["insights"] = valid_insights
                 logger.info(f"使用 AI 洞察: {len(valid_insights)} 条")
             else:
-                logger.warning(f"AI 返回的洞察全是错误信息，使用 Pandas 默认洞察")
+                logger.warning(f"AI 返回的洞察全部被过滤，使用 Pandas 默认洞察")
         # 如果Pandas计算的某些字段为空但AI有数据，用AI补充
         for key in ["range_stats", "cat_stats", "prod_stats", "recycle_items"]:
             if not analysis_result.get(key) and ai_result.get(key):
